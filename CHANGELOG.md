@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.2
+
+- README: added a how-to-use demo GIF.
+
 ## 1.0.1
 
 - Fix: the page's CSS, images and fonts didn't load in the preview, so pages looked unstyled. Files are now sent to the preview in a format that VS Code can't corrupt.
