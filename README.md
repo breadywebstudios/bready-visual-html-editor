@@ -19,6 +19,7 @@ Only the part you changed is rewritten. Indentation, comments, quoting and every
 - **Move up / down, duplicate, delete**, or **add** headings, paragraphs, buttons, images, lists and sections.
 - **Page settings:** page title and meta description (the Google snippet).
 - **Desktop / Tablet / Mobile** preview widths.
+- **⟳ Reload** to go back to the last saved version of the file and refresh the preview.
 - **Works with VS Code itself:**
   - undo/redo, the unsaved-changes dot, Save, git and Live Share all behave normally
   - edits made in the text editor show up in the visual view, and the other way round

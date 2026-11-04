@@ -138,6 +138,7 @@ class Session {
       case 'undo': await vscode.commands.executeCommand('undo'); break;
       case 'redo': await vscode.commands.executeCommand('redo'); break;
       case 'save': await this.queue; await this.document.save(); break;
+      case 'reload': await this.queue; await this.reload(); break;
       case 'select': this.syncSelection(m.start, m.end); break;
       case 'showSource': this.provider.active = this; this.provider.showSource(m.start != null ? { start: m.start, end: m.end } : undefined); break;
       case 'setConfig':
@@ -171,6 +172,28 @@ class Session {
       clearTimeout(this.saveTimer);
       this.saveTimer = setTimeout(() => { this.queue.then(() => doc.isDirty && doc.save()); }, 400);
     }
+  }
+
+  // Go back to what's saved on disk: discards unsaved visual/text edits (they stay
+  // in VS Code's undo history) and refreshes CSS/images in the preview.
+  async reload() {
+    const doc = this.document;
+    if (doc.isDirty) {
+      const pick = await vscode.window.showWarningMessage(
+        `Discard unsaved changes to ${baseName(doc.uri)} and reload the last saved version?`,
+        { modal: true }, 'Discard & Reload');
+      if (pick !== 'Discard & Reload') return;
+    }
+    let disk = null;
+    try { disk = new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(doc.uri)); } catch { /* unsaved new file */ }
+    if (disk != null && disk !== doc.getText()) {
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), disk);
+      this.suppress++;
+      try { await vscode.workspace.applyEdit(edit); } finally { this.suppress--; }
+      await doc.save();
+    }
+    this.post({ type: 'reloaded', text: doc.getText() });
   }
 
   syncSelection(start, end) {

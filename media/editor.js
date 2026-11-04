@@ -24,6 +24,7 @@ document.getElementById('app').innerHTML = `
     <button class="tbtn" id="srcBtn" title="Open the source code beside this editor">&lt;/&gt; Source</button>
     <label class="tog" title="Run the page's own scripts in the preview"><input type="checkbox" id="scriptsTog">Scripts</label>
     <label class="tog" title="Save the file after every visual edit"><input type="checkbox" id="autoTog">Auto-save</label>
+    <button class="tbtn" id="reloadBtn" title="Reload the last saved version of the file and refresh the preview">⟳ Reload</button>
     <button class="btn primary" id="saveBtn" title="Save (Ctrl+S)">Save</button>
   </header>
   <div class="main">
@@ -102,6 +103,12 @@ window.addEventListener('message', e => {
       autosave = m.autoSave; $('#autoTog').checked = autosave; $('#scriptsTog').checked = runScripts;
       break;
     case 'assetsChanged': blobCache.clear(); render(); break;
+    case 'reloaded':
+      blobCache.clear(); editingEl = null; hideTextbar();
+      src = m.text; reparse();
+      if (selStart != null && !byStart.has(selStart)) selStart = null;
+      render(); toast('Reloaded the last saved version');
+      break;
     case 'reply': { const w = waiting.get(m.id); if (w){ waiting.delete(m.id); m.ok ? w.res(m.value) : w.rej(new Error(m.error)); } break; }
   }
 });
@@ -575,6 +582,7 @@ async function opReplaceImage(){
 /* ================= TOP BAR & KEYS ================= */
 $('#undo').onclick = () => { if (editingEl) commitEdit(); vscode.postMessage({type: 'undo'}); };
 $('#redo').onclick = () => vscode.postMessage({type: 'redo'});
+$('#reloadBtn').onclick = () => { if (editingEl) commitEdit(); vscode.postMessage({type: 'reload'}); };
 $('#saveBtn').onclick = () => { if (editingEl) commitEdit(); vscode.postMessage({type: 'save'}); };
 $('#srcBtn').onclick = () => { const nd = curNode(); vscode.postMessage({type: 'showSource', start: nd ? nd.start : null, end: nd ? nd.end : null}); };
 $('#devices').addEventListener('click', e => {

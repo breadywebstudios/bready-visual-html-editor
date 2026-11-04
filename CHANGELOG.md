@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+- New **⟳ Reload** button that goes back to the last saved version of the file. It asks before discarding unsaved changes, which you can still bring back with Undo. It also refreshes the preview so CSS and image changes made elsewhere show up.
+
 ## 1.1.0
 
 - New **Font** picker in the Style panel. It lists the fonts already used on the page, 28 popular Google Fonts and common system fonts, each previewed in its own typeface. You can also type any font name.
