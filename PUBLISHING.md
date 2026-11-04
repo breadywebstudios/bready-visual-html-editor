@@ -38,8 +38,8 @@ For a one-person extension, the manual upload in step 2 is simpler.
 
 ## 4. Before the first public release
 
-- Add a `"repository"` field to `package.json` pointing at your GitHub repo. Then `vsce package` works without `--allow-missing-repository`, and README images can be relative paths.
-- Add a screenshot or GIF near the top of `README.md`. Listings with visuals get far more installs. Images must be PNG/JPG/GIF over **https** (not SVG).
+- ✅ `"repository"` points at github.com/breadywebstudios/bready-visual-html-editor, so README images use relative paths (vsce turns them into GitHub links).
+- ✅ Demo GIF (`images/demo.gif`) is at the top of the README. **Push to GitHub before publishing**, or the Marketplace page will show a broken image.
 - `"icon"` must be a PNG of at least 128×128. `images/icon.png` is 256×256.
 - Optionally publish to **Open VSX** (<https://open-vsx.org>) as well. Cursor, Windsurf and VSCodium install extensions from there, not from the Microsoft Marketplace. Sign in with GitHub, create the `breadywebstudios` namespace, then run `npx ovsx publish *.vsix -p <token>`.
 
@@ -48,4 +48,4 @@ For a one-person extension, the manual upload in step 2 is simpler.
 - [ ] Publisher ID matches `package.json`
 - [ ] Version bumped and CHANGELOG updated
 - [ ] Tested the `.vsix` via **Install from VSIX…**
-- [ ] README has a screenshot
+- [ ] Pushed to GitHub (the README GIF is loaded from there)

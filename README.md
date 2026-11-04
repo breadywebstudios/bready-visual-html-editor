@@ -4,6 +4,8 @@ Edit your HTML pages **visually**, right inside VS Code. Click anything on the p
 
 Only the part you changed is rewritten. Indentation, comments, quoting and everything else in the file stay exactly as they were, so your git diffs show just your real edits.
 
+![Selecting, typing, styling and duplicating elements in the visual editor, then the saved changes in index.html](images/demo.gif)
+
 ## Features
 
 - **Click to select, double-click to type.** Bold, italic, underline and links while you type.

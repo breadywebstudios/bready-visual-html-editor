@@ -16,6 +16,14 @@
     "theme": "dark"
   },
   "homepage": "https://breadywebstudio.vercel.app",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/breadywebstudios/bready-visual-html-editor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/breadywebstudios/bready-visual-html-editor/issues",
+    "email": "breadywebstudios@gmail.com"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -41,8 +49,12 @@
         "viewType": "breadyVisualHtml.editor",
         "displayName": "Bready Visual HTML Editor",
         "selector": [
-          { "filenamePattern": "*.html" },
-          { "filenamePattern": "*.htm" }
+          {
+            "filenamePattern": "*.html"
+          },
+          {
+            "filenamePattern": "*.htm"
+          }
         ],
         "priority": "option"
       }
