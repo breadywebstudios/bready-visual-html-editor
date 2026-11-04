@@ -2,7 +2,7 @@
   "name": "bready-visual-html-editor",
   "displayName": "Bready Visual HTML Editor",
   "description": "Edit HTML and PHP pages visually — click to select, double-click to type — and every change is written straight into your source file, leaving the rest (including PHP code) untouched.",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "publisher": "breadywebstudios",
   "author": {
     "name": "Bready Web Studios",

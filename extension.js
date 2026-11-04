@@ -140,6 +140,22 @@ class Session {
       case 'redo': await vscode.commands.executeCommand('redo'); break;
       case 'save': await this.queue; await this.document.save(); break;
       case 'reload': await this.queue; await this.reload(); break;
+      case 'addToHead':
+        try {
+          const uri = this.safeUri(m.segs);
+          const d = await vscode.workspace.openTextDocument(uri);
+          const text = d.getText();
+          const at = text.search(/<\/head\s*>/i);
+          if (at < 0 || text.includes(m.html)) break;
+          const lineStart = text.lastIndexOf('\n', at - 1) + 1;
+          const before = text.slice(lineStart, at);
+          const edit = new vscode.WorkspaceEdit();
+          if (/^[ \t]*$/.test(before)) edit.insert(uri, d.positionAt(lineStart), before + '  ' + m.html + '\n');
+          else edit.insert(uri, d.positionAt(at), m.html);
+          if (await vscode.workspace.applyEdit(edit) && this.config().autoSave) await d.save();
+          this.post({ type: 'assetsChanged' });
+        } catch (err) { vscode.window.showWarningMessage('Could not add the font link: ' + err.message); }
+        break;
       case 'openFile':
         try {
           const uri = this.safeUri(m.segs);

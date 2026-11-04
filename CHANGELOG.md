@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1
+
+- PHP pages: when the `<head>` is in an included file such as `header.php`, Google Fonts links chosen in the font picker are now added there, so the font shows in the preview and on the live site.
+- Refreshed the Details page with a PHP demo and a clearer feature overview.
+
 ## 1.3.0
 
 - **PHP support.** `.php` and `.phtml` files open in the visual editor.

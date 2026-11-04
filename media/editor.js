@@ -65,6 +65,7 @@ const MIME = {png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif'
 /* ---------------- state ---------------- */
 let hasRoot = false, isPhp = false, phpBlocks = [], incSel = null, showPhp = true;
 const incCache = new Map();
+let headInclude = null;   // {segs, text} of the included file that contains <head>
 let file = null;            // {segs, name}
 let src = '';
 let nodes = [], byStart = new Map();
@@ -489,6 +490,7 @@ async function includeHtml(b, ctx){
     }
     if (text == null){ if (b.chipOk) out += `<vedit-php class="missing" title="${attrQ('Could not find ' + inc.path)}">include ${escHtml(inc.path)} — not found</vedit-php>`; continue; }
     const ns = parse(text, true); annotatePhp(text, ns.php);
+    if (!headInclude && ns.some(n => n.tag === 'head')) headInclude = {segs: found, text};
     out += await previewOf(text, ns, ns.php, {main: false, incSegs: found, depth: ctx.depth + 1, seen: new Set([...ctx.seen, found.join('/')]), baseSegs: ctx.baseSegs, dirSegs: found.slice(0, -1)});
   }
   return out;
@@ -548,6 +550,7 @@ async function previewOf(text, ns, blocks, ctx){
   return out + text.slice(pos);
 }
 function buildPreview(){
+  headInclude = null;
   const baseSegs = file ? file.segs.slice(0, -1) : [];
   return previewOf(src, nodes, phpBlocks, {main: true, depth: 0, seen: new Set([file ? file.segs.join('/') : '']), baseSegs, dirSegs: baseSegs});
 }
@@ -1092,25 +1095,37 @@ function pageFonts(){
 }
 function hasGoogleLink(family){
   const key = family.replace(/ /g, '+').toLowerCase(), key2 = family.replace(/ /g, '%20').toLowerCase();
+  if (headInclude && !nodes.some(n => n.tag === 'head')){
+    const re = new RegExp('fonts\\.googleapis\\.com[^"\'>]*family=(' + key.replace(/\+/g, '\\+') + '|' + key2 + ')(?=[:&"\']|$)', 'i');
+    if (re.test(decodeEnt(headInclude.text))) return true;
+  }
   return nodes.some(nd => nd.tag === 'link' && /fonts\.googleapis\.com/i.test(attrVal(nd, 'href') || '') &&
     new RegExp('family=(' + key.replace(/\+/g, '\\+') + '|' + key2 + ')(?=[:&]|$)', 'i').test(decodeEnt(attrVal(nd, 'href') || '')));
 }
 function addGoogleLink(g){
   const head = nodes.find(n => n.tag === 'head');
-  if (!head || hasGoogleLink(g[0])) return;
+  if (hasGoogleLink(g[0])) return 'linked';
   const fam = g[0].replace(/ /g, '+') + (g[2] ? ':wght@' + g[2] : '');
   const tag = `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${fam}&amp;display=swap">`;
+  if (!head){
+    // PHP sites usually keep <head> in an include such as header.php — add it there
+    if (headInclude){ vscode.postMessage({type: 'addToHead', segs: headInclude.segs, html: tag}); return 'include'; }
+    return 'none';
+  }
   let p = head.closeStart; while (p > head.openEnd && (src[p-1] === ' ' || src[p-1] === '\t')) p--;
   const indent = lineInfo(head.start).indent + '  ';
   if (src[p-1] === '\n') replaceRange(p, p, indent + tag + '\n');
   else replaceRange(head.closeStart, head.closeStart, tag);
 }
 function applyFont(startAt, value, google){
-  if (google) addGoogleLink(google);           // shifts offsets; re-find the element afterwards
+  const already = google ? hasGoogleLink(google[0]) : true;
+  const where = google ? addGoogleLink(google) : null;   // may shift offsets; re-find the element afterwards
   const n2 = byStart.get(selStart != null ? selStart : startAt); if (!n2) return;
   setStyleProp(n2, 'font-family', value);
-  if (google && !hasGoogleLink(google[0])) toast(isPhp ? `Font set — this page's <head> is in an included file, so add the Google Fonts link for ${google[0]} there` : `Font set — note: this page has no <head>, so add a Google Fonts link for ${google[0]} yourself`);
-  else if (google) toast(`${google[0]} added — its Google Fonts link was put in <head>`);
+  if (!google || already) return;
+  if (where === 'include') return toast(`${google[0]} added — its Google Fonts link was put in ${headInclude.segs.join('/')}`);
+  if (where === 'none') return toast(`Font set — this page has no <head>, so add a Google Fonts link for ${google[0]} yourself`);
+  return toast(`${google[0]} added — its Google Fonts link was put in <head>`);
 }
 function fontField(nd, current, computed){
   const shown = firstFamily(current || computed) || 'Default';
