@@ -784,6 +784,7 @@ function renderNodePanel(box, nd){
     const align = decl['text-align'] || '';
     box.append(section('Style',
       E('div', {class: 'row2'}, colorField('Text colour', 'color'), colorField('Background', 'background-color')),
+      fontField(nd, decl['font-family'] || '', cs ? cs.fontFamily : ''),
       E('div', {class: 'row2'}, sf('Font size', 'font-size', 'fontSize'),
         E('label', {class: 'fld'}, E('span', {class: 'lbl', text: 'Weight'}),
           E('select', {class: 'inp', onchange: e => setStyleProp(nd, 'font-weight', e.target.value)},
@@ -825,6 +826,129 @@ function renderNodePanel(box, nd){
   box.append(section('Add element', E('div', {class: 'row2'}, kindSel, whereSel),
     E('button', {class: 'btn', text: '+ Insert', onclick: () => opInsert(kindSel.value, whereSel.value)})));
 }
+
+/* ================= FONT PICKER ================= */
+const GOOGLE_FONTS = [
+  // [family, fallback, weights for the <link> (omit when the family has a single weight)]
+  ['Inter', 'sans-serif', '400;500;600;700'], ['Poppins', 'sans-serif', '400;500;600;700'], ['Montserrat', 'sans-serif', '400;500;600;700'],
+  ['Roboto', 'sans-serif', '400;500;700'], ['Open Sans', 'sans-serif', '400;500;600;700'], ['Lato', 'sans-serif', '400;700'],
+  ['Nunito', 'sans-serif', '400;600;700'], ['Raleway', 'sans-serif', '400;500;600;700'], ['DM Sans', 'sans-serif', '400;500;700'],
+  ['Work Sans', 'sans-serif', '400;500;600'], ['Hanken Grotesk', 'sans-serif', '400;500;600'], ['Outfit', 'sans-serif', '400;500;600;700'],
+  ['Playfair Display', 'serif', '400;600;700'], ['Lora', 'serif', '400;500;600;700'], ['Merriweather', 'serif', '400;700'],
+  ['Cormorant Garamond', 'serif', '400;500;600;700'], ['EB Garamond', 'serif', '400;500;600'], ['Libre Baskerville', 'serif', '400;700'],
+  ['DM Serif Display', 'serif', ''], ['Bodoni Moda', 'serif', '400;500;600'],
+  ['Bebas Neue', 'sans-serif', ''], ['Abril Fatface', 'serif', ''], ['Pacifico', 'cursive', ''], ['Dancing Script', 'cursive', '400;600;700'],
+  ['Great Vibes', 'cursive', ''], ['Caveat', 'cursive', '400;600'], ['JetBrains Mono', 'monospace', '400;500'], ['Fira Code', 'monospace', '400;500']
+];
+const SYSTEM_FONTS = [
+  ['System UI', "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"], ['Arial', 'Arial, Helvetica, sans-serif'],
+  ['Helvetica', "'Helvetica Neue', Helvetica, Arial, sans-serif"], ['Verdana', 'Verdana, Geneva, sans-serif'],
+  ['Tahoma', 'Tahoma, Geneva, sans-serif'], ['Trebuchet MS', "'Trebuchet MS', Helvetica, sans-serif"],
+  ['Georgia', 'Georgia, serif'], ['Times New Roman', "'Times New Roman', Times, serif"], ['Palatino', "'Palatino Linotype', Palatino, serif"],
+  ['Courier New', "'Courier New', Courier, monospace"], ['Monospace', 'ui-monospace, Menlo, Consolas, monospace']
+];
+const GENERIC = new Set(['serif','sans-serif','monospace','cursive','fantasy','system-ui','ui-serif','ui-sans-serif','ui-monospace','-apple-system','inherit','initial']);
+const firstFamily = v => (v || '').split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+const cssFamily = name => /^[\w-]+$/.test(name) && !/^\d/.test(name) ? name : `'${name}'`;
+let previewFontsLoaded = false, openFont = null;
+document.addEventListener('mousedown', e => { if (openFont && !openFont.pop.hidden && !openFont.pop.contains(e.target) && !openFont.btn.contains(e.target)) openFont.pop.hidden = true; }, true);
+function loadPreviewFonts(){
+  if (previewFontsLoaded) return; previewFontsLoaded = true;
+  const names = GOOGLE_FONTS.map(f => f[0]);
+  const text = encodeURIComponent([...new Set((names.join('') + 'Aa').split(''))].join(''));
+  const l = document.createElement('link'); l.rel = 'stylesheet';
+  l.href = 'https://fonts.googleapis.com/css2?' + names.map(n => 'family=' + n.replace(/ /g, '+')).join('&') + '&text=' + text + '&display=swap';
+  document.head.appendChild(l);
+}
+function pageFonts(){
+  const found = new Map();
+  // families requested from Google Fonts in the source
+  for (const nd of nodes){
+    if (nd.tag !== 'link') continue;
+    const href = decodeEnt(attrVal(nd, 'href') || '');
+    if (!/fonts\.googleapis\.com/.test(href)) continue;
+    for (const m of href.matchAll(/family=([^:&]+)/g)) found.set(decodeURIComponent(m[1].replace(/\+/g, ' ')), null);
+  }
+  // fonts actually used by elements in the preview
+  if (doc){
+    let n = 0;
+    for (const el of doc.querySelectorAll('body, body *')){
+      if (++n > 1500) break;
+      const fam = doc.defaultView.getComputedStyle(el).fontFamily;
+      const f = firstFamily(fam);
+      if (f && !GENERIC.has(f.toLowerCase()) && !found.get(f)) found.set(f, fam);
+    }
+  }
+  return [...found].slice(0, 14).map(([name, stack]) => {
+    const g = GOOGLE_FONTS.find(x => x[0].toLowerCase() === name.toLowerCase());
+    return {name, value: stack || `${cssFamily(name)}, ${g ? g[1] : 'sans-serif'}`};
+  });
+}
+function hasGoogleLink(family){
+  const key = family.replace(/ /g, '+').toLowerCase(), key2 = family.replace(/ /g, '%20').toLowerCase();
+  return nodes.some(nd => nd.tag === 'link' && /fonts\.googleapis\.com/i.test(attrVal(nd, 'href') || '') &&
+    new RegExp('family=(' + key.replace(/\+/g, '\\+') + '|' + key2 + ')(?=[:&]|$)', 'i').test(decodeEnt(attrVal(nd, 'href') || '')));
+}
+function addGoogleLink(g){
+  const head = nodes.find(n => n.tag === 'head');
+  if (!head || hasGoogleLink(g[0])) return;
+  const fam = g[0].replace(/ /g, '+') + (g[2] ? ':wght@' + g[2] : '');
+  const tag = `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${fam}&amp;display=swap">`;
+  let p = head.closeStart; while (p > head.openEnd && (src[p-1] === ' ' || src[p-1] === '\t')) p--;
+  const indent = lineInfo(head.start).indent + '  ';
+  if (src[p-1] === '\n') replaceRange(p, p, indent + tag + '\n');
+  else replaceRange(head.closeStart, head.closeStart, tag);
+}
+function applyFont(startAt, value, google){
+  if (google) addGoogleLink(google);           // shifts offsets; re-find the element afterwards
+  const n2 = byStart.get(selStart != null ? selStart : startAt); if (!n2) return;
+  setStyleProp(n2, 'font-family', value);
+  if (google && !hasGoogleLink(google[0])) toast(`Font set — note: this page has no <head>, so add a Google Fonts link for ${google[0]} yourself`);
+  else if (google) toast(`${google[0]} added — its Google Fonts link was put in <head>`);
+}
+function fontField(nd, current, computed){
+  const shown = firstFamily(current || computed) || 'Default';
+  const btn = E('button', {class: 'inp fontbtn', type: 'button', title: current || computed || ''},
+    E('span', {text: shown + (current ? '' : '  (inherited)'), style: `font-family:${current || computed || 'inherit'}`}), E('span', {class: 'caret', text: '▾'}));
+  const pop = E('div', {class: 'fontpop', hidden: true});
+  const search = E('input', {class: 'inp', placeholder: 'Search or type any font name…', 'data-key': 'fontsearch'});
+  const list = E('div', {class: 'fontlist'});
+  pop.append(search, list);
+  const startAt = nd.start;
+  const choose = (value, google) => { pop.hidden = true; applyFont(startAt, value, google); };
+  const build = () => {
+    const q = search.value.trim().toLowerCase();
+    const match = name => !q || name.toLowerCase().includes(q);
+    list.replaceChildren();
+    const group = (title, items) => {
+      items = items.filter(i => match(i.name)); if (!items.length) return;
+      list.append(E('div', {class: 'fontgrp', text: title}));
+      for (const i of items) list.append(E('button', {type: 'button', class: 'fontopt' + (firstFamily(current).toLowerCase() === i.name.toLowerCase() ? ' on' : ''), onclick: () => choose(i.value, i.google)},
+        E('span', {class: 'fname', style: `font-family:${i.preview || i.value}`, text: i.name}), i.note ? E('span', {class: 'fnote', text: i.note}) : null));
+    };
+    if (!q && current) list.append(E('button', {type: 'button', class: 'fontopt', onclick: () => choose('', null)}, E('span', {class: 'fname', text: 'Default'}), E('span', {class: 'fnote', text: 'remove — use the page CSS'})));
+    group('Used on this page', pageFonts());
+    group('Google Fonts', GOOGLE_FONTS.map(g => ({name: g[0], value: `${cssFamily(g[0])}, ${g[1]}`, preview: `'${g[0]}', ${g[1]}`, google: g, note: hasGoogleLink(g[0]) ? 'linked' : g[1]})));
+    group('System fonts (no download)', SYSTEM_FONTS.map(f => ({name: f[0], value: f[1]})));
+    if (q && !list.children.length) list.append(E('div', {class: 'fontgrp', text: 'Press Enter to use “' + search.value.trim() + '”'}));
+  };
+  search.addEventListener('input', build);
+  search.addEventListener('keydown', e => {
+    if (e.key === 'Escape'){ pop.hidden = true; return; }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const name = search.value.trim(); if (!name) return;
+    const g = GOOGLE_FONTS.find(x => x[0].toLowerCase() === name.toLowerCase());
+    choose(g ? `${cssFamily(g[0])}, ${g[1]}` : name.includes(',') ? name : `${cssFamily(name)}, sans-serif`, g || null);
+  });
+  btn.addEventListener('click', () => {
+    pop.hidden = !pop.hidden;
+    if (!pop.hidden){ loadPreviewFonts(); search.value = ''; build(); search.focus(); }
+  });
+  openFont = {pop, btn};
+  return E('div', {class: 'fld fontfld'}, E('span', {class: 'lbl', text: 'Font'}), btn, pop);
+}
+
 function hexToRgb(h){ h = h.replace('#', ''); if (h.length === 3) h = [...h].map(c => c + c).join(''); const n = parseInt(h.slice(0, 6), 16); return isNaN(n) ? '' : `rgb(${n >> 16},${(n >> 8) & 255},${n & 255})`; }
 
 

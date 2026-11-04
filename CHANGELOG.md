@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0
+
+- New **Font** picker in the Style panel. It lists the fonts already used on the page, 28 popular Google Fonts and common system fonts, each previewed in its own typeface. You can also type any font name.
+- Choosing a Google Font automatically adds its stylesheet `<link>` to the page's `<head>`, once per font, so it works on the live site too.
+
 ## 1.0.2
 
 - README: added a how-to-use demo GIF.

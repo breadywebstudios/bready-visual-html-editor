@@ -12,6 +12,7 @@ Only the part you changed is rewritten. Indentation, comments, quoting and every
 - **Side panel** for the selected element:
   - text, link address and "open in new tab"
   - image file and alt text, plus **Replace image…**, which copies the picture into your project
+  - **font picker** with fonts used on the page, popular Google Fonts (the `<link>` is added for you) and system fonts
   - colour, background, font size, weight, alignment, padding, margin, width and corner radius
   - id, classes and every other attribute
   - the element's own HTML, for quick code-level fixes

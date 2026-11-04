@@ -97,3 +97,17 @@ ul.tips{margin:0;padding-left:18px;color:var(--muted);display:grid;gap:4px}
 .toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(16px);opacity:0;background:var(--vscode-notifications-background,#1f1d1a);color:var(--vscode-notifications-foreground,#fff);border:1px solid var(--line);padding:7px 12px;border-radius:6px;transition:.2s;pointer-events:none;z-index:9;max-width:80vw;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 .toast.show{opacity:1;transform:translateX(-50%)}
 @media (max-width:700px){.main{grid-template-columns:1fr}.insp{display:none}}
+
+/* font picker */
+.fontfld{position:relative}
+.fontbtn{display:flex;justify-content:space-between;align-items:center;text-align:left;cursor:pointer;font-size:14px}
+.fontbtn span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fontbtn .caret{color:var(--muted);font-family:var(--vscode-font-family,system-ui);margin-left:6px}
+.fontpop{position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:20;background:var(--vscode-dropdown-background,var(--input-bg));border:1px solid var(--input-border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.28);padding:6px;display:grid;gap:6px}
+.fontlist{max-height:300px;overflow:auto;display:grid}
+.fontgrp{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:8px 6px 3px}
+.fontopt{display:flex;justify-content:space-between;align-items:baseline;gap:8px;border:0;background:none;text-align:left;padding:5px 6px;border-radius:4px}
+.fontopt:hover{background:var(--vscode-list-hoverBackground,var(--hover-bg))}
+.fontopt.on{background:var(--vscode-list-activeSelectionBackground,var(--btn2-bg));color:var(--vscode-list-activeSelectionForeground,inherit)}
+.fname{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fnote{font-size:11px;color:var(--muted);white-space:nowrap;font-family:var(--vscode-font-family,system-ui)}
