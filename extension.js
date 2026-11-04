@@ -193,7 +193,10 @@ class Session {
 
   async handleRequest(m) {
     if (m.kind === 'readFile') {
-      return await vscode.workspace.fs.readFile(this.safeUri(m.segs));
+      // Sent as base64: VS Code may JSON-serialise webview messages, which turns
+      // a Uint8Array into a plain object and corrupts CSS/images.
+      const bytes = await vscode.workspace.fs.readFile(this.safeUri(m.segs));
+      return { base64: Buffer.from(bytes).toString('base64') };
     }
     if (m.kind === 'pickImage') {
       const picked = await vscode.window.showOpenDialog({

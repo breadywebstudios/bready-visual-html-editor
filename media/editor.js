@@ -342,9 +342,17 @@ async function rewriteSrcset(v, baseSegs){
 }
 
 
+function toBytes(v){
+  if (!v) return null;
+  if (typeof v.base64 === 'string'){ const bin = atob(v.base64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+  if (v instanceof Uint8Array) return v;
+  if (v instanceof ArrayBuffer) return new Uint8Array(v);
+  if (typeof v === 'object'){ const n = Object.keys(v).length; const u = new Uint8Array(n); for (let i = 0; i < n; i++) u[i] = v[i]; return u; } // JSON-mangled typed array
+  return null;
+}
 async function getFileAt(segs){
   if (!hasRoot || !segs || !segs.length) return null;
-  try { const data = await request('readFile', {segs}); return data ? new Blob([data]) : null; } catch { return null; }
+  try { const data = await request('readFile', {segs}); const bytes = toBytes(data); return bytes ? new Blob([bytes]) : null; } catch { return null; }
 }
 
 /* builds the instrumented copy of the page shown in the preview */

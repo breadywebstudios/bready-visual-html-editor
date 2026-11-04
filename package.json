@@ -2,7 +2,7 @@
   "name": "bready-visual-html-editor",
   "displayName": "Bready Visual HTML Editor",
   "description": "Edit HTML pages visually — click to select, double-click to type — and every change is written straight into your .html source, leaving the rest of the file untouched.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "breadywebstudios",
   "author": {
     "name": "Bready Web Studios",
