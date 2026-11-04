@@ -1,6 +1,6 @@
 # Bready Visual HTML Editor
 
-Edit your HTML pages **visually**, right inside VS Code. Click anything on the page to select it, double-click text to type straight into it, and change links, images, colours and spacing from a side panel. Every change is written into your `.html` source file.
+Edit your HTML and PHP pages **visually**, right inside VS Code. Click anything on the page to select it, double-click text to type straight into it, and change links, images, colours and spacing from a side panel. Every change is written into your `.html` or `.php` source file.
 
 Only the part you changed is rewritten. Indentation, comments, quoting and everything else in the file stay exactly as they were, so your git diffs show just your real edits.
 
@@ -24,12 +24,16 @@ Only the part you changed is rewritten. Indentation, comments, quoting and every
   - undo/redo, the unsaved-changes dot, Save, git and Live Share all behave normally
   - edits made in the text editor show up in the visual view, and the other way round
   - selecting an element highlights its code in an open text editor
+- **PHP pages too:**
+  - PHP code is kept exactly as written and shown as small purple tags. It doesn't run, and the **PHP tags** toggle hides the tags.
+  - `include`/`require` files (header, footer, nav) are pulled in so you see the whole page. Click an included part to open that file.
+  - Anything containing PHP is protected from accidental edits.
 - **Your images, CSS and fonts load in the preview.** Files from your workspace are used, and CSS or image changes refresh it automatically.
 
 ## How to use
 
 1. Open your website folder in VS Code (**File → Open Folder…**).
-2. Open an `.html` file and click the **✎ Open in Visual Editor** button in the editor title bar. You can also right-click the file in the Explorer and choose **Open in Visual Editor**.
+2. Open an `.html` or `.php` file and click the **✎ Open in Visual Editor** button in the editor title bar. You can also right-click the file in the Explorer and choose **Open in Visual Editor**.
 3. Click, double-click, edit. Use **</> Source** to open the code beside it.
 
 To always open HTML files visually, right-click an `.html` file → **Open With…** → **Configure default editor for '\*.html'** → **Bready Visual HTML Editor**.
@@ -53,6 +57,7 @@ To always open HTML files visually, right-click an `.html` file → **Open With�
 
 ## Good to know
 
+- For PHP pages, the preview shows the HTML around your PHP, not the PHP's output. Loops show their template once, and text or images that PHP fills in appear as tags or placeholders. To change PHP logic, use **</> Source**.
 - It edits the HTML that's **in the file**. Content created by JavaScript at runtime, and frameworks like React, Vue or Next.js, can't be edited visually.
 - Style changes are saved as an inline `style=""` on that element. They are not written into your CSS file.
 - Page scripts are off in the preview by default so the page stays still while you edit. Inline handlers such as `onclick="…"` never run in the preview.

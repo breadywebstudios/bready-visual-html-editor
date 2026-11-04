@@ -22,6 +22,7 @@ document.getElementById('app').innerHTML = `
       <button class="tbtn" id="redo" title="Redo (Ctrl+Shift+Z)">↷</button>
     </div>
     <button class="tbtn" id="srcBtn" title="Open the source code beside this editor">&lt;/&gt; Source</button>
+    <label class="tog" title="Show PHP code as small tags in the preview" hidden><input type="checkbox" id="phpTog" checked>PHP tags</label>
     <label class="tog" title="Run the page's own scripts in the preview"><input type="checkbox" id="scriptsTog">Scripts</label>
     <label class="tog" title="Save the file after every visual edit"><input type="checkbox" id="autoTog">Auto-save</label>
     <button class="tbtn" id="reloadBtn" title="Reload the last saved version of the file and refresh the preview">⟳ Reload</button>
@@ -62,7 +63,8 @@ const MIME = {png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',gif:'image/gif'
 
 
 /* ---------------- state ---------------- */
-let hasRoot = false;
+let hasRoot = false, isPhp = false, phpBlocks = [], incSel = null, showPhp = true;
+const incCache = new Map();
 let file = null;            // {segs, name}
 let src = '';
 let nodes = [], byStart = new Map();
@@ -86,6 +88,8 @@ window.addEventListener('message', e => {
       hasRoot = m.hasRoot; autosave = m.autoSave; runScripts = m.runScripts;
       $('#autoTog').checked = autosave; $('#scriptsTog').checked = runScripts;
       file = {segs: m.segs, name: m.segs[m.segs.length - 1]};
+      isPhp = /\.(php|phtml)$/i.test(file.name);
+      $('#phpTog').parentElement.hidden = !isPhp;
       $('#path').innerHTML = escHtml(m.segs.slice(0, -1).join(' / ') + (m.segs.length > 1 ? ' / ' : '')) + '<b>' + escHtml(file.name) + '</b>';
       src = m.text; reparse(); render({fresh: true}); renderInspector();
       break;
@@ -102,9 +106,9 @@ window.addEventListener('message', e => {
       if (runScripts !== m.runScripts){ runScripts = m.runScripts; render(); }
       autosave = m.autoSave; $('#autoTog').checked = autosave; $('#scriptsTog').checked = runScripts;
       break;
-    case 'assetsChanged': blobCache.clear(); render(); break;
+    case 'assetsChanged': blobCache.clear(); incCache.clear(); render(); break;
     case 'reloaded':
-      blobCache.clear(); editingEl = null; hideTextbar();
+      blobCache.clear(); incCache.clear(); editingEl = null; hideTextbar();
       src = m.text; reparse();
       if (selStart != null && !byStart.has(selStart)) selStart = null;
       render(); toast('Reloaded the last saved version');
@@ -149,17 +153,40 @@ function closesOnOpen(open, t){
 }
 const WS = c => c === ' ' || c === '\n' || c === '\t' || c === '\r' || c === '\f';
 
-function parse(text){
-  const n = text.length, list = [];
+/* ---- PHP: where does a <?php … ?> block end? (skips strings, comments, heredocs) ---- */
+function phpEnd(text, i){
+  const n = text.length; let p = i + 2;
+  while (p < n){
+    const c = text[p];
+    if (c === '?' && text[p+1] === '>') return p + 2;
+    if (c === "'" || c === '"' || c === '`'){ p++; while (p < n && text[p] !== c){ if (text[p] === '\\') p++; p++; } p++; continue; }
+    if (c === '/' && text[p+1] === '*'){ const e = text.indexOf('*/', p + 2); p = e < 0 ? n : e + 2; continue; }
+    if ((c === '/' && text[p+1] === '/') || (c === '#' && text[p+1] !== '[')){
+      while (p < n && text[p] !== '\n' && !(text[p] === '?' && text[p+1] === '>')) p++;
+      continue;
+    }
+    if (c === '<' && text.startsWith('<<<', p)){
+      const m = /^<<<[ \t]*(['"]?)([A-Za-z_]\w*)\1\r?\n/.exec(text.slice(p, p + 200));
+      if (m){ const re = new RegExp('\\n[ \\t]*' + m[2] + '\\b', 'g'); re.lastIndex = p + m[0].length - 1; const mm = re.exec(text); p = mm ? mm.index + mm[0].length : n; continue; }
+    }
+    p++;
+  }
+  return n;
+}
+const isPhpAt = (text, i) => text.charCodeAt(i) === 60 && text.charCodeAt(i + 1) === 63; // "<?"
+
+function parse(text, php = false){
+  const n = text.length, list = [], blocks = [];
   const top = {tag:'#root', children:[], start:0, openEnd:0, closeStart:n, end:n, parent:null, attrs:[]};
   const stack = [top];
-  const reClose = /<\/([a-zA-Z][^\s\/>]*)[^>]*>/y, reOpen = /<([a-zA-Z][^\s\/>]*)/y;
+  const reClose = /<\/([a-zA-Z][^\s\/><]*)[^>]*>/y, reOpen = /<([a-zA-Z][^\s\/><]*)/y;
   const inForeign = () => stack.some(s => s.tag === 'svg' || s.tag === 'math');
   let i = 0;
   while (i < n){
     const lt = text.indexOf('<', i); if (lt < 0) break;
     if (text.startsWith('<!--', lt)){ const e = text.indexOf('-->', lt + 4); i = e < 0 ? n : e + 3; continue; }
     const c = text[lt + 1];
+    if (php && c === '?'){ const e = phpEnd(text, lt); blocks.push({start: lt, end: e, ctx: 'content', parent: stack[stack.length-1]}); i = e; continue; }
     if (c === '!' || c === '?'){ const e = text.indexOf('>', lt); i = e < 0 ? n : e + 1; continue; }
     if (c === '/'){
       reClose.lastIndex = lt; const m = reClose.exec(text);
@@ -175,35 +202,51 @@ function parse(text){
     reOpen.lastIndex = lt; const m = reOpen.exec(text);
     if (!m){ i = lt + 1; continue; }
     const tag = m[1].toLowerCase();
-    let p = lt + m[0].length, selfClose = false; const attrs = [];
+    let p = lt + m[0].length, selfClose = false; const attrs = [], tagPhp = [];
     while (p < n){
       while (p < n && WS(text[p])) p++;
       if (p >= n) break;
       const ch = text[p];
+      if (php && isPhpAt(text, p)){ const e = phpEnd(text, p); tagPhp.push({start: p, end: e}); p = e; continue; }
       if (ch === '>'){ p++; break; }
       if (ch === '/'){ if (text[p+1] === '>'){ selfClose = true; p += 2; break; } p++; continue; }
-      const ns = p; while (p < n && !WS(text[p]) && text[p] !== '/' && text[p] !== '>' && text[p] !== '=') p++;
+      const ns = p; while (p < n && !WS(text[p]) && text[p] !== '/' && text[p] !== '>' && text[p] !== '=' && !(php && isPhpAt(text, p))) p++;
       if (p === ns){ p++; continue; }
-      const name = text.slice(ns, p); let vs = null, ve = null, quote = '';
+      const name = text.slice(ns, p); let vs = null, ve = null, quote = ''; const vphp = [];
       let q = p; while (q < n && WS(text[q])) q++;
       if (text[q] === '='){
         q++; while (q < n && WS(text[q])) q++;
         const qc = text[q];
-        if (qc === '"' || qc === "'"){ quote = qc; vs = q + 1; const e = text.indexOf(qc, vs); ve = e < 0 ? n : e; p = e < 0 ? n : e + 1; }
-        else { vs = q; while (q < n && !WS(text[q]) && text[q] !== '>') q++; ve = q; p = q; }
+        if (qc === '"' || qc === "'"){
+          quote = qc; vs = q + 1; let e = vs;
+          while (e < n && text[e] !== qc){ if (php && isPhpAt(text, e)){ const pe = phpEnd(text, e); vphp.push({start: e, end: pe}); e = pe; continue; } e++; }
+          ve = e; p = e < n ? e + 1 : n;
+        } else {
+          vs = q;
+          while (q < n && !WS(text[q]) && text[q] !== '>'){ if (php && isPhpAt(text, q)){ const pe = phpEnd(text, q); vphp.push({start: q, end: pe}); q = pe; continue; } q++; }
+          ve = q; p = q;
+        }
       }
-      attrs.push({name, lname:name.toLowerCase(), fullStart:ns, fullEnd:p, valueStart:vs, valueEnd:ve, quote, value: vs == null ? '' : text.slice(vs, ve)});
+      attrs.push({name, lname:name.toLowerCase(), fullStart:ns, fullEnd:p, valueStart:vs, valueEnd:ve, quote, value: vs == null ? '' : text.slice(vs, ve), php: vphp.length ? vphp : null});
     }
     const foreign = inForeign() || tag === 'svg' || tag === 'math';
     while (stack.length > 1 && closesOnOpen(stack[stack.length-1].tag, tag)){ const t = stack.pop(); t.closeStart = t.end = lt; }
     const parent = stack[stack.length-1];
     const node = {tag, start:lt, openEnd:p, attrs, children:[], parent, id:list.length,
       isVoid: VOID.has(tag) && !foreign, raw: RAW.has(tag) && !foreign, foreign};
+    for (const b of tagPhp) blocks.push({...b, ctx: 'tag', node});
+    for (const a of attrs) if (a.php) for (const b of a.php) blocks.push({...b, ctx: 'attr', node, attr: a});
     parent.children.push(node); list.push(node);
     if (node.isVoid || (selfClose && foreign)){ node.closeStart = node.end = p; i = p; continue; }
     if (node.raw){
-      const re = new RegExp('</' + tag + '(?=[\\s/>])', 'ig'); re.lastIndex = p;
-      const mm = re.exec(text);
+      const re = new RegExp('</' + tag + '(?=[\\s/>])', 'ig');
+      let pos = p, mm = null;
+      while (true){
+        re.lastIndex = pos; mm = re.exec(text);
+        const ph = php ? text.indexOf('<?', pos) : -1;
+        if (ph >= 0 && (!mm || ph < mm.index)){ const e = phpEnd(text, ph); blocks.push({start: ph, end: e, ctx: 'raw', node}); pos = e; continue; }
+        break;
+      }
       if (mm){ const gt = text.indexOf('>', mm.index); node.closeStart = mm.index; node.end = gt < 0 ? n : gt + 1; }
       else { node.closeStart = node.end = n; }
       i = node.end; continue;
@@ -211,9 +254,13 @@ function parse(text){
     stack.push(node); i = p;
   }
   while (stack.length > 1){ const t = stack.pop(); t.closeStart = t.end = n; }
+  blocks.sort((a, b) => a.start - b.start);
+  list.php = blocks;
   return list;
 }
-function reparse(){ nodes = parse(src); byStart = new Map(nodes.map(nd => [nd.start, nd])); }
+function reparse(){ nodes = parse(src, isPhp); phpBlocks = annotatePhp(src, nodes.php); byStart = new Map(nodes.map(nd => [nd.start, nd])); }
+const phpIn = (s, e) => phpBlocks.filter(b => b.start >= s && b.end <= e);
+const attrHasPhp = (nd, name) => { const a = getAttr(nd, name); return !!(a && a.php); };
 const getAttr = (nd, name) => nd.attrs.find(a => a.lname === name);
 const attrVal = (nd, name) => { const a = getAttr(nd, name); return a ? a.value : null; };
 function attrInsertPos(nd){
@@ -223,7 +270,8 @@ function attrInsertPos(nd){
   while (p > nd.start && WS(src[p-1])) p--;
   return p;
 }
-const isTextEditable = nd => nd && !nd.isVoid && !nd.raw && !nd.foreign && !['html','head','body','select','table','tbody','thead','tr','ul','ol','dl'].includes(nd.tag);
+const isTextEditable = nd => nd && !nd.isVoid && !nd.raw && !nd.foreign && !['html','head','body','select','table','tbody','thead','tr','ul','ol','dl'].includes(nd.tag)
+  && !phpIn(nd.openEnd, nd.closeStart).some(b => b.include || (b.ctx === 'content' && !b.chip));
 
 
 function escText(t){ return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/ /g,'&nbsp;'); }
@@ -233,6 +281,7 @@ const escHtml = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replac
 
 function setAttr(nd, name, value){
   const a = getAttr(nd, name.toLowerCase());
+  if (a && a.php && value != null){ toast('This attribute contains PHP code — edit it in the source (</> Code).'); return; }
   if (value == null){
     if (!a) return;
     let s = a.fullStart; while (s > nd.start && WS(src[s-1])) s--;
@@ -257,6 +306,7 @@ function parseStyle(s){
   return out.map(p => { const i = p.indexOf(':'); return i < 0 ? null : [p.slice(0,i).trim().toLowerCase(), p.slice(i+1).trim()]; }).filter(x => x && x[0]);
 }
 function setStyleProp(nd, prop, val){
+  if (attrHasPhp(nd, 'style')){ toast('This element\'s style contains PHP code — edit it in the source (</> Code).'); return; }
   const decl = parseStyle(decodeEnt(attrVal(nd, 'style') || ''));
   const i = decl.findIndex(d => d[0] === prop);
   val = (val || '').trim().replace(/;+$/,'').replace(/"/g, "'");
@@ -279,6 +329,8 @@ function serializeNode(n){
   if (n.nodeType === 3) return escText(n.data);
   if (n.nodeType === 8) return `<!--${n.data}-->`;
   if (n.nodeType !== 1) return '';
+  const pk = n.getAttribute('data-vedit-php');
+  if (pk != null){ const b = phpBlocks[+pk]; return b ? src.slice(b.start, b.end) : ''; }
   const id = n.getAttribute('data-vedit-id');
   const sn = id != null ? nodes[+id] : null;
   if (sn){
@@ -362,12 +414,93 @@ async function getFileAt(segs){
   try { const data = await request('readFile', {segs}); const bytes = toBytes(data); return bytes ? new Blob([bytes]) : null; } catch { return null; }
 }
 
-/* builds the instrumented copy of the page shown in the preview */
-async function buildPreview(){
+/* ================= PHP IN THE PREVIEW =================
+   PHP never runs here. Each <?php … ?> block becomes a small tag ("chip") in
+   the preview, include/require files are pulled in so the page looks complete,
+   and the source keeps every PHP block exactly as written. */
+const NO_CHIP_PARENTS = new Set(['#root','html','head','table','thead','tbody','tfoot','tr','colgroup','ul','ol','dl','select','optgroup','datalist','picture','video','audio','object']);
+const attrQ = t => String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+function annotatePhp(text, blocks){
+  for (const b of blocks){
+    const raw = text.slice(b.start, b.end);
+    b.echo = raw.startsWith('<?=');
+    b.code = raw.replace(/^<\?(?:php\b|=)?/i, '').replace(/\?>$/, '').trim();
+    b.incs = [];
+    if (b.ctx === 'content'){
+      const re = /\b(?:include|require)(?:_once)?\s*\(?\s*((?:__DIR__|dirname\s*\(\s*__FILE__\s*\)|\$_SERVER\s*\[\s*['"]DOCUMENT_ROOT['"]\s*\])\s*\.\s*)?(['"])([^'"$]+)\2\s*\)?\s*(?:;|$)/gi;
+      let m; while ((m = re.exec(b.code))) b.incs.push({path: m[3], base: !m[1] ? 'rel' : /DOCUMENT_ROOT/i.test(m[1]) ? 'root' : 'dir'});
+    }
+    b.include = b.incs.length > 0;
+    b.chipOk = b.ctx === 'content' && !NO_CHIP_PARENTS.has(b.parent.tag);
+    // Code that prints nothing (if/foreach/$x = …) sitting between elements would
+    // become a stray box in grids and flex rows, so it's only tagged inside text.
+    b.output = b.echo || /^(echo|print)\b/i.test(b.code);
+    b.chip = b.chipOk && !b.include && (b.output || !betweenElements(text, b));
+    let label = b.code.replace(/\s+/g, ' ');
+    if (b.echo) label = '= ' + label.replace(/;$/, '');
+    else if (/^(echo|print)\b/i.test(label)) label = label.replace(/;$/, '');
+    else { const kw = /^(if|else\s*if|elseif|else|endif|foreach|endforeach|for|endfor|while|endwhile|switch|case|default|endswitch|function|return)\b/i.exec(label); label = kw ? kw[1].toLowerCase().replace(/\s+/, ' ') : label.length < 22 ? label : 'php'; }
+    if (!label) label = 'php';
+    b.label = label.length > 32 ? label.slice(0, 30) + '…' : label;
+  }
+  return blocks;
+}
+function betweenElements(text, b){
+  let i = b.start - 1; while (i >= 0 && WS(text[i])) i--;
+  let j = b.end; while (j < text.length && WS(text[j])) j++;
+  return (i < 0 || text[i] === '>') && (j >= text.length || text[j] === '<');
+}
+const PHP_IMG = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260" viewBox="0 0 400 260"><rect width="400" height="260" fill="#ede9fe"/><text x="200" y="138" font-family="monospace" font-size="20" fill="#5b21b6" text-anchor="middle">image set by PHP</text></svg>');
+function stripPhpRanges(text, s, e, ranges){
+  let out = '', pos = s;
+  for (const r of ranges){ if (r.start < pos || r.end > e) continue; out += text.slice(pos, r.start); pos = r.end; }
+  return out + text.slice(pos, e);
+}
+function attrInsertPosIn(text, nd){
+  let p = nd.openEnd - 1;
+  if (text[p] !== '>') p = nd.openEnd;
+  if (text[p-1] === '/') p--;
+  while (p > nd.start && WS(text[p-1])) p--;
+  return p;
+}
+function chipHtml(b, k, main){
+  const ref = main ? ` data-vedit-php="${k}"` : '';
+  return `<vedit-php${ref} contenteditable="false" title="${attrQ('PHP: ' + b.code.slice(0, 300))}">${escHtml(b.label)}</vedit-php>`;
+}
+function includeCandidates(inc, dirSegs){
+  const path = inc.path.replace(/^\.\//, '');
+  const list = inc.base === 'dir' ? [resolvePath(path.replace(/^\/+/, ''), dirSegs)]
+    : inc.base === 'root' ? [resolvePath(path.replace(/^\/+/, ''), [])]
+    : [resolvePath(path, dirSegs), resolvePath(path, file.segs.slice(0, -1)), resolvePath(path.replace(/^\/+/, ''), [])];
+  const seen = new Set(); return list.filter(c => c && c.length && !seen.has(c.join('/')) && seen.add(c.join('/')));
+}
+async function readText(segs){
+  const key = segs.join('/');
+  if (!incCache.has(key)) incCache.set(key, getFileAt(segs).then(b => b ? b.text() : null).catch(() => null));
+  return incCache.get(key);
+}
+async function includeHtml(b, ctx){
+  let out = '';
+  for (const inc of b.incs){
+    let text = null, found = null;
+    if (ctx.depth < 5) for (const cand of includeCandidates(inc, ctx.dirSegs)){
+      if (ctx.seen.has(cand.join('/'))) continue;
+      const t = await readText(cand); if (t != null){ text = t; found = cand; break; }
+    }
+    if (text == null){ if (b.chipOk) out += `<vedit-php class="missing" title="${attrQ('Could not find ' + inc.path)}">include ${escHtml(inc.path)} — not found</vedit-php>`; continue; }
+    const ns = parse(text, true); annotatePhp(text, ns.php);
+    out += await previewOf(text, ns, ns.php, {main: false, incSegs: found, depth: ctx.depth + 1, seen: new Set([...ctx.seen, found.join('/')]), baseSegs: ctx.baseSegs, dirSegs: found.slice(0, -1)});
+  }
+  return out;
+}
+
+/* builds the instrumented copy of a page (or an included file) for the preview */
+async function previewOf(text, ns, blocks, ctx){
   const edits = [], jobs = [];
-  const baseSegs = file ? file.segs.slice(0, -1) : [];
-  for (const nd of nodes){
-    let extra = ` data-vedit-id="${nd.id}"`;
+  const baseSegs = ctx.baseSegs;
+  const mark = ctx.main ? null : ` data-vedit-inc="${attrQ(ctx.incSegs.join('/'))}"`;
+  for (const nd of ns){
+    let extra = ctx.main ? ` data-vedit-id="${nd.id}"` : (['html','head','body'].includes(nd.tag) ? '' : mark);
     if (nd.tag === 'script'){
       if (runScripts) extra += ` nonce="${NONCE}"`;
       else { const t = getAttr(nd, 'type'); if (t) edits.push([t.fullStart, t.fullEnd, 'type="text/x-vedit-off"']); else extra += ' type="text/x-vedit-off"'; }
@@ -375,31 +508,48 @@ async function buildPreview(){
     if (nd.tag === 'meta' && /refresh|content-security-policy/i.test(attrVal(nd, 'http-equiv') || '')){
       const a = getAttr(nd, 'http-equiv'); edits.push([a.fullStart, a.fullStart, 'data-vedit-x-']);
     }
-    const p = attrInsertPos(nd); edits.push([p, p, extra]);
-    if (!hasRoot) continue;
+    const p = attrInsertPosIn(text, nd); edits.push([p, p, extra]);
     for (const a of nd.attrs){
-      if (a.valueStart == null || !a.value.trim()) continue;
+      if (a.valueStart == null) continue;
+      const val = a.php ? stripPhpRanges(text, a.valueStart, a.valueEnd, a.php) : a.value;
       const ln = a.lname, t = nd.tag;
-      if (ln === 'src' || ln === 'poster' || (ln === 'href' && (t === 'link' || t === 'image' || t === 'use')) || (ln === 'xlink:href' && (t === 'image' || t === 'use')) || (ln === 'data' && t === 'object')){
-        if (ln === 'src' && t === 'script' && !runScripts) continue;
+      const isUrl = ln === 'src' || ln === 'poster' || (ln === 'href' && (t === 'link' || t === 'image' || t === 'use')) || (ln === 'xlink:href' && (t === 'image' || t === 'use')) || (ln === 'data' && t === 'object');
+      if (a.php && (ln === 'src' || ln === 'srcset') && (t === 'img' || t === 'source')){
+        edits.push([a.valueStart, a.valueEnd, ln === 'src' ? PHP_IMG : '']);
+      } else if (hasRoot && val.trim() && isUrl && !(ln === 'src' && t === 'script' && !runScripts)){
         const asCss = t === 'link' && /stylesheet/i.test(attrVal(nd, 'rel') || '');
-        jobs.push(resolveUrl(decodeEnt(a.value), baseSegs, asCss).then(u => { if (u) edits.push([a.valueStart, a.valueEnd, u]); }));
-      } else if (ln === 'srcset'){
-        jobs.push(rewriteSrcset(a.value, baseSegs).then(v => { edits.push([a.valueStart, a.valueEnd, v]); }));
-      } else if (ln === 'style' && /url\(/i.test(a.value)){
-        jobs.push(rewriteCss(decodeEnt(a.value), baseSegs, 0).then(v => { edits.push([a.valueStart, a.valueEnd, a.quote === "'" ? v.replace(/'/g, '"') : v.replace(/"/g, "'")]); }));
+        jobs.push(resolveUrl(decodeEnt(val), baseSegs, asCss).then(u => { edits.push([a.valueStart, a.valueEnd, u || val]); }));
+      } else if (hasRoot && ln === 'srcset' && val.trim()){
+        jobs.push(rewriteSrcset(val, baseSegs).then(v => { edits.push([a.valueStart, a.valueEnd, v]); }));
+      } else if (hasRoot && ln === 'style' && /url\(/i.test(val)){
+        jobs.push(rewriteCss(decodeEnt(val), baseSegs, 0).then(v => { edits.push([a.valueStart, a.valueEnd, a.quote === "'" ? v.replace(/'/g, '"') : v.replace(/"/g, "'")]); }));
+      } else if (a.php){
+        edits.push([a.valueStart, a.valueEnd, val]);
       }
     }
-    if (nd.tag === 'style' && nd.raw){
-      const css = src.slice(nd.openEnd, nd.closeStart);
-      if (/url\(|@import/i.test(css)) jobs.push(rewriteCss(css, baseSegs, 0).then(v => { if (v !== css) edits.push([nd.openEnd, nd.closeStart, v]); }));
+    if (nd.raw){
+      const inner = blocks.filter(b => b.ctx === 'raw' && b.node === nd);
+      const body = inner.length ? stripPhpRanges(text, nd.openEnd, nd.closeStart, inner) : text.slice(nd.openEnd, nd.closeStart);
+      if (hasRoot && nd.tag === 'style' && /url\(|@import/i.test(body)) jobs.push(rewriteCss(body, baseSegs, 0).then(v => { edits.push([nd.openEnd, nd.closeStart, v]); }));
+      else if (inner.length) edits.push([nd.openEnd, nd.closeStart, body]);
     }
   }
+  blocks.forEach((b, k) => {
+    if (b.ctx === 'tag') edits.push([b.start, b.end, '']);
+    else if (b.ctx === 'content'){
+      if (b.include) jobs.push(includeHtml(b, ctx).then(h => { edits.push([b.start, b.end, h]); }));
+      else edits.push([b.start, b.end, b.chip ? chipHtml(b, k, ctx.main) : '']);
+    }
+  });
   await Promise.all(jobs);
   edits.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
   let out = '', pos = 0;
-  for (const [s, e, t] of edits){ if (s < pos) continue; out += src.slice(pos, s) + t; pos = e; }
-  return out + src.slice(pos);
+  for (const [s, e, t] of edits){ if (s < pos) continue; out += text.slice(pos, s) + t; pos = e; }
+  return out + text.slice(pos);
+}
+function buildPreview(){
+  const baseSegs = file ? file.segs.slice(0, -1) : [];
+  return previewOf(src, nodes, phpBlocks, {main: true, depth: 0, seen: new Set([file ? file.segs.join('/') : '']), baseSegs, dirSegs: baseSegs});
 }
 
 /* ================= RENDER / PREVIEW ================= */
@@ -423,21 +573,26 @@ async function render(opts = {}){
 }
 function wire(d, w){
   const st = d.createElement('style');
-  st.textContent = '[data-vedit-editing]{outline:2px solid #c2410c!important;outline-offset:3px;cursor:text!important;min-width:8px}html{scroll-behavior:auto!important}';
+  st.textContent = '[data-vedit-editing]{outline:2px solid #c2410c!important;outline-offset:3px;cursor:text!important;min-width:8px}html{scroll-behavior:auto!important}'
+    + 'vedit-php{display:inline-block;font:500 11px/1.6 ui-monospace,Menlo,Consolas,monospace!important;color:#5b21b6!important;background:#ede9fe!important;border:1px solid #c4b5fd;border-radius:4px;padding:0 5px;margin:0 2px;vertical-align:middle;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;cursor:default;letter-spacing:0;text-transform:none;text-decoration:none;font-style:normal;text-shadow:none;user-select:none}'
+    + 'vedit-php.missing{color:#9a3412!important;background:#ffedd5!important;border-color:#fdba74}'
+    + 'html.vedit-hidephp vedit-php{display:none!important}';
+  d.documentElement.classList.toggle('vedit-hidephp', !showPhp);
   (d.head || d.documentElement).appendChild(st);
-  const target = e => e.target && e.target.closest ? e.target.closest('[data-vedit-id]') : null;
+  const target = e => e.target && e.target.closest ? e.target.closest('[data-vedit-id],[data-vedit-inc]') : null;
   d.addEventListener('mousemove', e => { if (editingEl){ setBox($('#hoverBox'), null); return; } const t = target(e); setBox($('#hoverBox'), t && t !== selEl ? t : null); }, true);
   d.addEventListener('mouseleave', () => setBox($('#hoverBox'), null));
   d.addEventListener('click', e => {
     if (editingEl && editingEl.contains(e.target)){ if (e.target.closest('a')) e.preventDefault(); return; }
     e.preventDefault(); e.stopPropagation();
     const t = target(e); if (!t) return;
+    if (t.hasAttribute('data-vedit-inc')){ if (editingEl) commitEdit(); selectInclude(t); return; }
     const nd = nodes[+t.getAttribute('data-vedit-id')];
     if (editingEl){ selStart = nd.start; if (!commitEdit()) selectNode(nd, t); return; }
     selectNode(nd, t);
   }, true);
   d.addEventListener('dblclick', e => {
-    const t = target(e); if (!t || editingEl) return;
+    const t = target(e); if (!t || editingEl || t.hasAttribute('data-vedit-inc')) return;
     const nd = nodes[+t.getAttribute('data-vedit-id')];
     e.preventDefault();
     selectNode(nd, t);
@@ -451,7 +606,13 @@ function wire(d, w){
   // leaving the page (inspector, another VS Code pane) finishes the text edit
   w.addEventListener('blur', () => setTimeout(() => { if (editingEl && document.activeElement !== $('#linkInp')) commitEdit(); }, 0));
 }
+function selectInclude(el){
+  selectNode(null);
+  incSel = {el, segs: el.getAttribute('data-vedit-inc').split('/')};
+  updateBoxes(); renderInspector();
+}
 function restoreSelection(){
+  incSel = null;
   const nd = selStart != null ? byStart.get(selStart) : null;
   if (!nd){ selStart = null; selEl = null; }
   else selEl = doc ? doc.querySelector(`[data-vedit-id="${nd.id}"]`) : null;
@@ -460,6 +621,7 @@ function restoreSelection(){
 let syncTimer = null;
 function selectNode(nd, el){
   if (editingEl) commitEdit();
+  incSel = null;
   selStart = nd ? nd.start : null;
   selEl = el || (nd && doc ? doc.querySelector(`[data-vedit-id="${nd.id}"]`) : null);
   setBox($('#hoverBox'), null);
@@ -475,9 +637,13 @@ function setBox(box, el){
   return r;
 }
 function updateBoxes(){
-  const r = setBox($('#selBox'), editingEl ? null : selEl);
+  const r = setBox($('#selBox'), editingEl ? null : (selEl || (incSel && incSel.el)));
   const tag = $('#selTag');
   if (!r || editingEl){ tag.style.display = 'none'; }
+  else if (incSel){
+    tag.textContent = 'from ' + incSel.segs.join('/');
+    tag.style.display = 'block'; tag.style.left = Math.max(0, r.left) + 'px'; tag.style.top = (r.top > 20 ? r.top - 19 : r.top + 2) + 'px';
+  }
   else {
     const nd = byStart.get(selStart);
     const cls = attrVal(nd, 'class');
@@ -521,7 +687,11 @@ function commitEdit(){
   el.removeAttribute('contenteditable'); el.removeAttribute('data-vedit-editing');
   hideTextbar();
   const after = serializeChildren(el);
-  if (after !== editBefore){ replaceRange(nd.openEnd, nd.closeStart, after); return true; }
+  if (after !== editBefore){
+    const lost = phpIn(nd.openEnd, nd.closeStart).filter(b => !after.includes(src.slice(b.start, b.end)));
+    if (lost.length){ toast('Edit cancelled — it would have deleted PHP code. Change that part in the source (</> Code).'); render(); return false; }
+    replaceRange(nd.openEnd, nd.closeStart, after); return true;
+  }
   updateBoxes(); renderInspector();
   return false;
 }
@@ -591,6 +761,7 @@ $('#devices').addEventListener('click', e => {
   $('#stage').className = 'stage ' + (b.dataset.dev === 'desktop' ? '' : b.dataset.dev);
   setTimeout(updateBoxes, 250);
 });
+$('#phpTog').onchange = e => { showPhp = e.target.checked; if (doc) doc.documentElement.classList.toggle('vedit-hidephp', !showPhp); updateBoxes(); };
 $('#scriptsTog').onchange = e => { runScripts = e.target.checked; vscode.postMessage({type: 'setConfig', key: 'runScripts', value: runScripts}); render(); };
 $('#autoTog').onchange = e => { autosave = e.target.checked; vscode.postMessage({type: 'setConfig', key: 'autoSave', value: autosave}); };
 function onKey(e, fromFrame){
@@ -707,8 +878,35 @@ function renderInspector(){
   box.replaceChildren();
   if (!file){ box.append(section('Inspector', E('p', {class: 'note', text: 'Loading…'}))); return; }
   const nd = curNode();
-  if (!nd) renderPagePanel(box); else renderNodePanel(box, nd);
+  if (incSel) renderIncPanel(box);
+  else if (!nd) renderPagePanel(box); else renderNodePanel(box, nd);
+  lockPhpFields(box, nd);
   if (keepKey){ const el = box.querySelector(`[data-key="${CSS.escape(keepKey)}"]`); if (el){ el.focus(); try { if (keepSel) el.setSelectionRange(...keepSel); } catch {} } }
+}
+function renderIncPanel(box){
+  const path = incSel.segs.join('/'), name = incSel.segs[incSel.segs.length - 1];
+  box.append(section('Included file',
+    E('div', {class: 'eltitle'}, name, ' ', E('small', {text: incSel.el.tagName.toLowerCase()})),
+    E('p', {class: 'note'}, 'This part of the page comes from ', E('b', {text: path}), ' through a PHP include, so it is edited in that file.'),
+    E('button', {class: 'btn primary', text: '✎ Open ' + name + ' in Visual Editor', onclick: () => vscode.postMessage({type: 'openFile', segs: incSel.segs, visual: true})}),
+    E('button', {class: 'btn', text: '</> Open ' + name + ' source', onclick: () => vscode.postMessage({type: 'openFile', segs: incSel.segs, visual: false})})));
+}
+/* inputs whose value contains PHP code are shown but can't be edited here */
+function lockPhpFields(box, nd){
+  if (!isPhp) return;
+  const keys = new Set();
+  if (nd) for (const a of nd.attrs) if (a.php){ keys.add(a.lname); keys.add('a-' + a.lname); if (a.lname === 'style') box.querySelectorAll('[data-key^="s-"]').forEach(el => keys.add(el.getAttribute('data-key'))); }
+  if (nd && phpIn(nd.openEnd, nd.closeStart).length) keys.add('text');
+  const title = nodes.find(n => n.tag === 'title' && n.raw);
+  if (title && phpIn(title.openEnd, title.closeStart).length) keys.add('ptitle');
+  const desc = nodes.find(n => n.tag === 'meta' && (attrVal(n, 'name') || '').toLowerCase() === 'description');
+  if (desc && attrHasPhp(desc, 'content')) keys.add('pdesc');
+  for (const el of box.querySelectorAll('[data-key]')){
+    if (!keys.has(el.getAttribute('data-key'))) continue;
+    el.readOnly = true; el.disabled = el.tagName === 'SELECT'; el.classList.add('php-ro');
+    el.title = 'Contains PHP code — edit it in the source (</> Code)';
+  }
+  if (nd && attrHasPhp(nd, 'style')) box.querySelectorAll('.colorrow input[type=color], .seg button').forEach(el => el.disabled = true);
 }
 function renderPagePanel(box){
   const title = nodes.find(n => n.tag === 'title' && n.raw);
@@ -757,7 +955,7 @@ function renderNodePanel(box, nd){
   if (isTextEditable(nd) && nd.children.length === 0){
     const inner = src.slice(nd.openEnd, nd.closeStart);
     const lead = inner.match(/^\s*/)[0], trail = inner.slice(lead.length).match(/\s*$/)[0];
-    const textNow = selEl ? selEl.textContent.trim() : decodeEnt(inner.trim());
+    const textNow = phpIn(nd.openEnd, nd.closeStart).length ? decodeEnt(inner.trim()) : selEl ? selEl.textContent.trim() : decodeEnt(inner.trim());
     box.append(section('Text', field('', 'text', textNow, v => replaceRange(nd.openEnd, nd.closeStart, lead + escText(v) + trail), {multiline: true})));
   }
   if (nd.tag === 'a'){
@@ -911,7 +1109,7 @@ function applyFont(startAt, value, google){
   if (google) addGoogleLink(google);           // shifts offsets; re-find the element afterwards
   const n2 = byStart.get(selStart != null ? selStart : startAt); if (!n2) return;
   setStyleProp(n2, 'font-family', value);
-  if (google && !hasGoogleLink(google[0])) toast(`Font set — note: this page has no <head>, so add a Google Fonts link for ${google[0]} yourself`);
+  if (google && !hasGoogleLink(google[0])) toast(isPhp ? `Font set — this page's <head> is in an included file, so add the Google Fonts link for ${google[0]} there` : `Font set — note: this page has no <head>, so add a Google Fonts link for ${google[0]} yourself`);
   else if (google) toast(`${google[0]} added — its Google Fonts link was put in <head>`);
 }
 function fontField(nd, current, computed){

@@ -5,7 +5,7 @@
 const vscode = require('vscode');
 
 const VIEW_TYPE = 'breadyVisualHtml.editor';
-const ASSET_GLOB = '**/*.{css,png,jpg,jpeg,gif,webp,avif,svg,ico,bmp,woff,woff2,ttf,otf,mp4,webm,mp3}';
+const ASSET_GLOB = '**/*.{css,png,jpg,jpeg,gif,webp,avif,svg,ico,bmp,woff,woff2,ttf,otf,mp4,webm,mp3,php,phtml,inc,html,htm}';
 
 function activate(context) {
   const provider = new VisualHtmlEditorProvider(context);
@@ -80,7 +80,8 @@ class Session {
     if (this.root) {
       const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(this.root, ASSET_GLOB));
       let t = null;
-      const changed = () => { clearTimeout(t); t = setTimeout(() => this.post({ type: 'assetsChanged' }), 300); };
+      // ignore saves of this very file — the editor already has its text
+      const changed = (uri) => { if (uri && uri.toString() === document.uri.toString()) return; clearTimeout(t); t = setTimeout(() => this.post({ type: 'assetsChanged' }), 300); };
       watcher.onDidChange(changed); watcher.onDidCreate(changed); watcher.onDidDelete(changed);
       this.disposables.push(watcher);
     }
@@ -139,6 +140,13 @@ class Session {
       case 'redo': await vscode.commands.executeCommand('redo'); break;
       case 'save': await this.queue; await this.document.save(); break;
       case 'reload': await this.queue; await this.reload(); break;
+      case 'openFile':
+        try {
+          const uri = this.safeUri(m.segs);
+          if (m.visual) await vscode.commands.executeCommand('vscode.openWith', uri, VIEW_TYPE);
+          else await vscode.window.showTextDocument(uri, { viewColumn: vscode.ViewColumn.Beside });
+        } catch (err) { vscode.window.showWarningMessage('Could not open that file: ' + err.message); }
+        break;
       case 'select': this.syncSelection(m.start, m.end); break;
       case 'showSource': this.provider.active = this; this.provider.showSource(m.start != null ? { start: m.start, end: m.end } : undefined); break;
       case 'setConfig':

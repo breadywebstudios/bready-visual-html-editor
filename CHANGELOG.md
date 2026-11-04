@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- **PHP support.** `.php` and `.phtml` files open in the visual editor.
+  - PHP code never runs. Blocks that print something show as small purple tags in the preview; the **PHP tags** toggle hides them.
+  - `include` / `require` files such as `header.php` are pulled into the preview, so the page shows its full design. Click an included part to open that file.
+  - Every PHP block stays exactly as written. Fields whose value contains PHP are read-only, and a text edit that would delete PHP code is refused.
+
 ## 1.2.0
 
 - New **⟳ Reload** button that goes back to the last saved version of the file. It asks before discarding unsaved changes, which you can still bring back with Undo. It also refreshes the preview so CSS and image changes made elsewhere show up.
