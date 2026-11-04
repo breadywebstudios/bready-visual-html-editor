@@ -1,0 +1,120 @@
+{
+  "name": "bready-visual-html-editor",
+  "displayName": "Bready Visual HTML Editor",
+  "description": "Edit HTML pages visually — click to select, double-click to type — and every change is written straight into your .html source, leaving the rest of the file untouched.",
+  "version": "1.0.0",
+  "publisher": "breadywebstudios",
+  "author": {
+    "name": "Bready Web Studios",
+    "email": "breadywebstudios@gmail.com",
+    "url": "https://breadywebstudio.vercel.app"
+  },
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#C2410C",
+    "theme": "dark"
+  },
+  "homepage": "https://breadywebstudio.vercel.app",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "html",
+    "visual editor",
+    "wysiwyg",
+    "website",
+    "landing page",
+    "static site",
+    "no-code",
+    "inline editing"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "breadyVisualHtml.editor",
+        "displayName": "Bready Visual HTML Editor",
+        "selector": [
+          { "filenamePattern": "*.html" },
+          { "filenamePattern": "*.htm" }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "breadyVisualHtml.open",
+        "title": "Open in Visual Editor",
+        "category": "Bready Visual HTML",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "breadyVisualHtml.openSource",
+        "title": "Show Source Code",
+        "category": "Bready Visual HTML",
+        "icon": "$(code)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "breadyVisualHtml.open",
+          "when": "resourceExtname =~ /^\\.html?$/ && activeCustomEditorId != 'breadyVisualHtml.editor'",
+          "group": "navigation"
+        },
+        {
+          "command": "breadyVisualHtml.openSource",
+          "when": "activeCustomEditorId == 'breadyVisualHtml.editor'",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "breadyVisualHtml.open",
+          "when": "resourceExtname =~ /^\\.html?$/",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "breadyVisualHtml.open",
+          "when": "resourceExtname =~ /^\\.html?$/"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "breadyVisualHtml.openSource",
+          "when": "activeCustomEditorId == 'breadyVisualHtml.editor'"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Bready Visual HTML Editor",
+      "properties": {
+        "breadyVisualHtml.autoSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save the file automatically after every visual edit."
+        },
+        "breadyVisualHtml.runScripts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run the page's own <script> tags in the preview. Off is safer and keeps the page stable while editing."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.0"
+  }
+}
